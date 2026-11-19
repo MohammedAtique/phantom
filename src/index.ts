@@ -441,7 +441,10 @@ async function main(): Promise<void> {
 	if (channelsConfig?.telegram?.enabled && channelsConfig.telegram.bot_token) {
 		telegramChannel = new TelegramChannel({
 			botToken: channelsConfig.telegram.bot_token,
-			ownerIds: parseTelegramOwnerIds(channelsConfig.telegram.owner_ids),
+			// The container env wins over channels.yaml: the agent can edit files under
+			// /app/config from a chat, but it cannot change its own environment.
+			ownerIds: parseTelegramOwnerIds(process.env.TELEGRAM_OWNER_IDS?.trim() || channelsConfig.telegram.owner_ids),
+			authFile: "data/telegram-authorized.json",
 		});
 		router.register(telegramChannel);
 		console.log("[phantom] Telegram channel registered");

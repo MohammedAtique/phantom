@@ -33,6 +33,20 @@ export type EvolutionConfig = z.infer<typeof EvolutionConfigSchema>;
 const DEFAULT_CONFIG_PATH = "config/evolution.yaml";
 
 export function loadEvolutionConfig(path?: string): EvolutionConfig {
+	return applyReflectionEnv(loadEvolutionConfigFile(path));
+}
+
+// PHANTOM_REFLECTION (auto|always|never) in the container env wins over the YAML,
+// so an operator can lock self-evolution in a way a chat cannot undo.
+function applyReflectionEnv(config: EvolutionConfig): EvolutionConfig {
+	const v = process.env.PHANTOM_REFLECTION?.trim();
+	if (v === "auto" || v === "always" || v === "never") {
+		return { ...config, reflection: { ...config.reflection, enabled: v } };
+	}
+	return config;
+}
+
+function loadEvolutionConfigFile(path?: string): EvolutionConfig {
 	const configPath = path ?? DEFAULT_CONFIG_PATH;
 
 	let text: string;

@@ -332,15 +332,12 @@ describe("TelegramChannel forum topics and owner check", () => {
 	test("/start tells a non-owner their user id and nothing else", async () => {
 		const channel = new TelegramChannel(testConfig);
 		await channel.connect();
-		const replies: string[] = [];
 		await commandHandlers.get("start")?.({
 			from: { id: 999 },
-			reply: async (t: string) => {
-				replies.push(t);
-				return { message_id: 1 };
-			},
+			message: { text: "/start", from: { id: 999 }, chat: { id: 999 }, message_id: 1 },
 		});
-		expect(replies).toEqual(["Not authorized. Your Telegram user ID is 999."]);
+		expect(mockSendMessage.mock.calls[0][1]).toBe("Not authorized. Your Telegram user ID is 999.");
+		expect(channel.isAuthorized(999, undefined)).toBe(false);
 	});
 
 	test("send() into a topic passes message_thread_id", async () => {
@@ -378,5 +375,84 @@ describe("TelegramChannel forum topics and owner check", () => {
 		expect(parseTelegramOwnerIds("")).toEqual([]);
 		expect(parseTelegramOwnerIds(null)).toEqual([]);
 		expect(parseTelegramOwnerIds("abc")).toEqual([]);
+	});
+});
+
+describe("TelegramChannel owner /start authorizes a topic for everyone", () => {
+	const file = `/tmp/phantom-auth-test-${process.pid}.json`;
+
+	beforeEach(async () => {
+		commandHandlers.clear();
+		eventHandlers.clear();
+		actionPatterns.length = 0;
+		mockSendMessage.mockClear();
+		const { rmSync } = await import("node:fs");
+		rmSync(file, { force: true });
+	});
+
+	const msg = (from: number, thread?: number, text = "hi") => ({
+		text,
+		from: { id: from },
+		chat: { id: -1001 },
+		message_id: 1,
+		...(thread !== undefined ? { message_thread_id: thread, is_topic_message: true } : {}),
+	});
+
+	async function setup() {
+		const channel = new TelegramChannel({ ...testConfig, authFile: file });
+		const received: Array<{ conversationId: string; senderId: string }> = [];
+		channel.onMessage(async (m) => {
+			received.push({ conversationId: m.conversationId, senderId: m.senderId });
+		});
+		await channel.connect();
+		return { channel, received };
+	}
+
+	test("before /start, a non-owner in a topic is ignored", async () => {
+		const { received } = await setup();
+		await eventHandlers.get("text")?.({ message: msg(999, 55) });
+		expect(received).toHaveLength(0);
+	});
+
+	test("owner /start in a topic lets anyone there talk, replies land in that topic", async () => {
+		const { channel, received } = await setup();
+		await commandHandlers.get("start")?.({ from: { id: 12345 }, message: msg(12345, 55, "/start") });
+		expect(channel.isAuthorized(-1001, 55)).toBe(true);
+		expect(mockSendMessage.mock.calls[0][2]).toMatchObject({ message_thread_id: 55 });
+
+		await eventHandlers.get("text")?.({ message: msg(999, 55) });
+		expect(received).toEqual([{ conversationId: "telegram:-1001:55", senderId: "999" }]);
+	});
+
+	test("authorizing one topic does not open another topic or General", async () => {
+		const { received } = await setup();
+		await commandHandlers.get("start")?.({ from: { id: 12345 }, message: msg(12345, 55, "/start") });
+		await eventHandlers.get("text")?.({ message: msg(999, 66) });
+		await eventHandlers.get("text")?.({ message: msg(999) });
+		expect(received).toHaveLength(0);
+	});
+
+	test("a non-owner /start cannot authorize anything", async () => {
+		const { channel } = await setup();
+		await commandHandlers.get("start")?.({ from: { id: 999 }, message: msg(999, 55, "/start") });
+		expect(channel.isAuthorized(-1001, 55)).toBe(false);
+	});
+
+	test("authorization survives a restart; owner /revoke removes it, non-owner /revoke does nothing", async () => {
+		const { channel } = await setup();
+		await commandHandlers.get("start")?.({ from: { id: 12345 }, message: msg(12345, 55, "/start") });
+		expect(new TelegramChannel({ ...testConfig, authFile: file }).isAuthorized(-1001, 55)).toBe(true);
+
+		await commandHandlers.get("revoke")?.({ from: { id: 999 }, message: msg(999, 55, "/revoke") });
+		expect(channel.isAuthorized(-1001, 55)).toBe(true);
+		await commandHandlers.get("revoke")?.({ from: { id: 12345 }, message: msg(12345, 55, "/revoke") });
+		expect(channel.isAuthorized(-1001, 55)).toBe(false);
+		expect(new TelegramChannel({ ...testConfig, authFile: file }).isAuthorized(-1001, 55)).toBe(false);
+	});
+
+	test("the owner is answered everywhere without /start", async () => {
+		const { received } = await setup();
+		await eventHandlers.get("text")?.({ message: msg(12345, 77) });
+		expect(received).toHaveLength(1);
 	});
 });

@@ -94,3 +94,20 @@ describe("loadEvolutionConfig", () => {
 		expect(config.paths.config_dir).toBe("phantom-config");
 	});
 });
+
+describe("PHANTOM_REFLECTION env override", () => {
+	test("env wins over the YAML and defaults", () => {
+		const saved = process.env.PHANTOM_REFLECTION;
+		try {
+			process.env.PHANTOM_REFLECTION = "never";
+			expect(loadEvolutionConfig("/nonexistent/evolution.yaml").reflection.enabled).toBe("never");
+			process.env.PHANTOM_REFLECTION = "bogus";
+			expect(loadEvolutionConfig("/nonexistent/evolution.yaml").reflection.enabled).toBe("auto");
+		} finally {
+			if (saved === undefined) {
+				// biome-ignore lint/performance/noDelete: tests must actually unset the env they set
+				delete process.env.PHANTOM_REFLECTION;
+			} else process.env.PHANTOM_REFLECTION = saved;
+		}
+	});
+});

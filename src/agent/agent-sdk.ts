@@ -73,7 +73,43 @@ export function tool<Schema extends AnyZodRawShape>(
 }
 
 export function query(params: AgentSdkQueryParams): Query {
-	return activeQuery(params);
+	return activeQuery(applyModelLock(params));
+}
+
+const LOCKED_EFFORTS = new Set(["low", "medium", "high", "max"]);
+
+/**
+ * Operator lock, set in the container environment so nothing reachable from a
+ * chat can change it. PHANTOM_MODEL_LOCK forces every SDK call (chat, judges,
+ * reflection, scheduler) onto one model, including the subprocess's own
+ * opus/sonnet/haiku aliases and subagents; PHANTOM_EFFORT_LOCK does the same
+ * for effort. Unset: calls pass through unchanged.
+ */
+export function applyModelLock(
+	params: AgentSdkQueryParams,
+	env: Record<string, string | undefined> = process.env,
+): AgentSdkQueryParams {
+	const model = env.PHANTOM_MODEL_LOCK?.trim();
+	const effort = env.PHANTOM_EFFORT_LOCK?.trim();
+	if (!model && !effort) return params;
+
+	const options: Record<string, unknown> = { ...(params.options ?? {}) };
+	if (model) {
+		options.model = model;
+		options.env = {
+			...((options.env as Record<string, string | undefined> | undefined) ?? process.env),
+			ANTHROPIC_MODEL: model,
+			ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+			ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+			ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+			ANTHROPIC_SMALL_FAST_MODEL: model,
+			CLAUDE_CODE_SUBAGENT_MODEL: model,
+		};
+	}
+	if (effort && LOCKED_EFFORTS.has(effort)) {
+		options.effort = effort;
+	}
+	return { ...params, options: options as AgentSdkQueryParams["options"] };
 }
 
 export async function configureAgentSdkRuntime(input: AgentSdkRuntimeSelection): Promise<void> {

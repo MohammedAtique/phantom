@@ -8,8 +8,14 @@
  * memory scope (see memory/scope.ts). Private chats and a group's General
  * topic use `telegram:<chatId>`.
  *
- * Only the user IDs in `ownerIds` are answered; an empty list answers nobody.
+ * Access: owners (`ownerIds`) are always answered. An owner sends /start once in
+ * a topic (or General, or a group) to authorize it; after that anyone there is
+ * answered. /revoke undoes it. Authorizations persist in `authFile`.
+ * Everywhere else only owners are answered; an empty owner list answers nobody.
  */
+
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage, SentMessage } from "./types.ts";
 
@@ -70,6 +76,8 @@ export type TelegramChannelConfig = {
 	ownerIds?: number[];
 	/** First reconnect delay after polling dies; doubles up to 60s. Default 5000. */
 	reconnectBaseMs?: number;
+	/** Where owner /start authorizations are saved. Without it they last until restart. */
+	authFile?: string;
 };
 
 type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
@@ -96,9 +104,12 @@ export class TelegramChannel implements Channel {
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempt = 0;
 	private stopped = false;
+	// Places an owner authorized with /start: "<chatId>:<topicId>" or "<chatId>:main"
+	private authorized = new Set<string>();
 
 	constructor(config: TelegramChannelConfig) {
 		this.config = config;
+		this.loadAuthorized();
 	}
 
 	async connect(): Promise<void> {
@@ -256,6 +267,51 @@ export class TelegramChannel implements Channel {
 		}
 	}
 
+	/** True when an owner authorized this chat/topic with /start. */
+	isAuthorized(chatId: number, threadId: number | undefined): boolean {
+		return this.authorized.has(placeKey(chatId, threadId));
+	}
+
+	/** Owners anywhere; anyone in an authorized chat/topic. */
+	canUse(userId: number | undefined, chatId: number, threadId: number | undefined): boolean {
+		return this.isOwner(userId) || this.isAuthorized(chatId, threadId);
+	}
+
+	setAuthorized(chatId: number, threadId: number | undefined, on: boolean): void {
+		const key = placeKey(chatId, threadId);
+		if (on) this.authorized.add(key);
+		else this.authorized.delete(key);
+		const file = this.config.authFile;
+		if (!file) return;
+		try {
+			mkdirSync(dirname(file), { recursive: true });
+			const tmp = `${file}.tmp`;
+			writeFileSync(tmp, `${JSON.stringify([...this.authorized].sort(), null, 2)}\n`);
+			renameSync(tmp, file);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.error(`[telegram] Could not save authorizations: ${msg}`);
+		}
+	}
+
+	private loadAuthorized(): void {
+		const file = this.config.authFile;
+		if (!file) return;
+		try {
+			const list: unknown = JSON.parse(readFileSync(file, "utf-8"));
+			if (Array.isArray(list)) for (const k of list) if (typeof k === "string") this.authorized.add(k);
+		} catch {
+			// no file yet
+		}
+	}
+
+	/** Reply in the same chat and topic as the incoming message. */
+	private async replyHere(chatId: number, threadId: number | undefined, text: string): Promise<void> {
+		await this.bot?.telegram
+			.sendMessage(chatId, text, threadId !== undefined ? { message_thread_id: threadId } : {})
+			.catch(() => {});
+	}
+
 	/** True when the sender is in ownerIds. */
 	isOwner(userId: number | undefined): boolean {
 		return userId !== undefined && (this.config.ownerIds ?? []).includes(userId);
@@ -297,23 +353,46 @@ export class TelegramChannel implements Channel {
 	private registerHandlers(): void {
 		if (!this.bot) return;
 
+		// Owner /start authorizes this chat/topic for everyone in it.
 		this.bot.command("start", async (ctx) => {
-			if (!this.isOwner(ctx.from?.id)) {
-				await ctx.reply(`Not authorized. Your Telegram user ID is ${ctx.from?.id ?? "unknown"}.`);
+			const m = ctx.message;
+			if (!m) return;
+			const threadId = topicThreadId(m);
+			if (this.isOwner(ctx.from?.id)) {
+				this.setAuthorized(m.chat.id, threadId, true);
+				console.log(`[telegram] Owner authorized ${placeKey(m.chat.id, threadId)}`);
+				await this.replyHere(m.chat.id, threadId, "Authorized: anyone here can now talk to me. Send /revoke to undo.");
 				return;
 			}
-			await ctx.reply("Hello! I'm Phantom, your AI co-worker. Send me a message to get started.");
+			if (this.isAuthorized(m.chat.id, threadId)) {
+				await this.replyHere(m.chat.id, threadId, "Hello! I'm Phantom. Send me a message to get started.");
+				return;
+			}
+			console.warn(`[telegram] /start from non-owner ${ctx.from?.id ?? "unknown"} (@${ctx.from?.username ?? "-"})`);
+			await this.replyHere(m.chat.id, threadId, `Not authorized. Your Telegram user ID is ${ctx.from?.id ?? "unknown"}.`);
+		});
+
+		this.bot.command("revoke", async (ctx) => {
+			const m = ctx.message;
+			if (!m || !this.isOwner(ctx.from?.id)) return;
+			const threadId = topicThreadId(m);
+			this.setAuthorized(m.chat.id, threadId, false);
+			console.log(`[telegram] Owner revoked ${placeKey(m.chat.id, threadId)}`);
+			await this.replyHere(m.chat.id, threadId, "Revoked: only the owner can talk to me here now.");
 		});
 
 		this.bot.command("status", async (ctx) => {
-			if (!this.isOwner(ctx.from?.id)) return;
-			await ctx.reply("Phantom is running and ready to help.");
+			const m = ctx.message;
+			if (!m || !this.canUse(ctx.from?.id, m.chat.id, topicThreadId(m))) return;
+			await this.replyHere(m.chat.id, topicThreadId(m), "Phantom is running and ready to help.");
 		});
 
 		this.bot.command("help", async (ctx) => {
-			if (!this.isOwner(ctx.from?.id)) return;
+			const m = ctx.message;
+			if (!m || !this.canUse(ctx.from?.id, m.chat.id, topicThreadId(m))) return;
 			await ctx.reply(
-				"Send me any message and I'll help you out.\n\nCommands:\n/start - Introduction\n/status - Check status\n/help - Show this message",
+				"Send me any message and I'll help you out.\n\nCommands:\n/start - Introduction (owner: authorize this topic)\n/revoke - Owner: remove authorization\n/status - Check status\n/help - Show this message",
+				m.message_thread_id !== undefined && m.is_topic_message ? { message_thread_id: m.message_thread_id } : {},
 			);
 		});
 
@@ -326,11 +405,13 @@ export class TelegramChannel implements Channel {
 
 			const chatId = ctx.message.chat.id;
 			const from = ctx.message.from;
-			if (!this.isOwner(from?.id)) {
-				console.warn(`[telegram] Ignored message from non-owner user ${from?.id ?? "unknown"} in chat ${chatId}`);
+			const threadId = topicThreadId(ctx.message);
+			if (!this.canUse(from?.id, chatId, threadId)) {
+				console.warn(
+					`[telegram] Ignored message from ${from?.id ?? "unknown"} in ${placeKey(chatId, threadId)} (not authorized)`,
+				);
 				return;
 			}
-			const threadId = topicThreadId(ctx.message);
 			const conversationId = telegramConversationId(chatId, threadId);
 
 			const inbound: InboundMessage = {
@@ -369,8 +450,8 @@ export class TelegramChannel implements Channel {
 			if (!chatId) return;
 
 			const from = ctx.from;
-			if (!this.isOwner(from?.id)) return;
 			const threadId = ctx.callbackQuery?.message ? topicThreadId(ctx.callbackQuery.message) : undefined;
+			if (!this.canUse(from?.id, chatId, threadId)) return;
 			const conversationId = telegramConversationId(chatId, threadId);
 
 			const inbound: InboundMessage = {
@@ -419,6 +500,10 @@ export function parseTelegramOwnerIds(raw: string | number | Array<string | numb
 	if (raw === null || raw === undefined) return [];
 	const parts = Array.isArray(raw) ? raw : String(raw).split(",");
 	return parts.map((p) => Number(String(p).trim())).filter((n) => Number.isInteger(n) && n > 0);
+}
+
+function placeKey(chatId: number, threadId: number | undefined): string {
+	return `${chatId}:${threadId ?? "main"}`;
 }
 
 function typingKey(chatId: number, threadId?: number): string {
