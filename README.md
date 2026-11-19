@@ -7,7 +7,8 @@
 > **About this fork.** Changes on top of [ghostwright/phantom](https://github.com/ghostwright/phantom):
 >
 > - **Telegram forum topics:** each topic is its own conversation with its own memory. A new topic starts fresh; the General topic and private chats write global memory that every topic can recall. Constitution, persona, role and evolved config apply to every topic.
-> - **Owner-only Telegram bot:** only the user IDs in `TELEGRAM_OWNER_IDS` are answered. Send `/start` to see your ID.
+> - **Owner-authorized topics:** owners are answered everywhere; an owner's `/start` in a topic opens it to everyone there (`/revoke` closes it). Non-owners get their ID from `/start`.
+> - **Operator locks:** `PHANTOM_MODEL_LOCK`, `PHANTOM_EFFORT_LOCK` and `PHANTOM_REFLECTION` pin the model, effort and self-evolution from the container environment.
 > - **Telegram works in Docker without Slack:** an invalid channel block (e.g. Slack with unset tokens) is skipped instead of discarding the whole `channels.yaml`, and the bot reports connected on Telegraf 4.16+.
 >
 > Details: [docs/channels.md](docs/channels.md#telegram).

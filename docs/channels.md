@@ -164,11 +164,27 @@ Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_IDS` in `.env`. The shipped
 `config/channels.yaml` already contains this block; it is skipped when the token
 is unset.
 
-### Owner only
+### Who can talk to the bot
 
-Only user IDs listed in `owner_ids` are answered. Everyone else is ignored, and
-an empty list answers nobody. To find your ID, send `/start` to the bot: a
-non-owner gets `Not authorized. Your Telegram user ID is <id>.`
+- **Owners** (`TELEGRAM_OWNER_IDS`) are answered everywhere.
+- An owner sends **`/start`** in a topic (or General, or a group) to authorize it.
+  After that, **anyone** there is answered. `/revoke` undoes it. Authorizations
+  are kept in `data/telegram-authorized.json`.
+- Everywhere else, only owners are answered. A non-owner who sends `/start` is
+  told their user ID. An empty owner list answers nobody.
+
+`TELEGRAM_OWNER_IDS` in the container environment takes precedence over
+`owner_ids` in `channels.yaml`.
+
+### Operator locks (container environment)
+
+| Variable | Effect |
+|---|---|
+| `PHANTOM_MODEL_LOCK` | Every Claude call (chat, judges, reflection, scheduler, subagents) uses this model |
+| `PHANTOM_EFFORT_LOCK` | Same for effort (`low`/`medium`/`high`/`max`) |
+| `PHANTOM_REFLECTION` | `never` turns off self-evolution, overriding `evolution.yaml` |
+
+A chat cannot change the container environment, unlike files under `/app/config`.
 
 ### Forum topics: one conversation and one memory per topic
 
