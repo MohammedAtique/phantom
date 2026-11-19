@@ -40,3 +40,27 @@ describe("applyModelLock", () => {
 		expect((out.options as Record<string, unknown>).effort).toBe("low");
 	});
 });
+
+describe("applyModelLock with a separate work model", () => {
+	test("main agent stays on the lock model; subagents and sonnet/haiku aliases use the work model", () => {
+		const out = applyModelLock(base, {
+			PHANTOM_MODEL_LOCK: "claude-opus-5-5",
+			PHANTOM_WORK_MODEL_LOCK: "claude-sonnet-5-5",
+			PHANTOM_EFFORT_LOCK: "low",
+		});
+		const opts = out.options as Record<string, unknown>;
+		const env = opts.env as Record<string, string>;
+		expect(opts.model).toBe("claude-opus-5-5");
+		expect(opts.effort).toBe("low");
+		expect(env.ANTHROPIC_MODEL).toBe("claude-opus-5-5");
+		expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-5-5");
+		for (const k of [
+			"ANTHROPIC_DEFAULT_SONNET_MODEL",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+			"ANTHROPIC_SMALL_FAST_MODEL",
+			"CLAUDE_CODE_SUBAGENT_MODEL",
+		]) {
+			expect(env[k]).toBe("claude-sonnet-5-5");
+		}
+	});
+});

@@ -369,7 +369,11 @@ export class TelegramChannel implements Channel {
 				return;
 			}
 			console.warn(`[telegram] /start from non-owner ${ctx.from?.id ?? "unknown"} (@${ctx.from?.username ?? "-"})`);
-			await this.replyHere(m.chat.id, threadId, `Not authorized. Your Telegram user ID is ${ctx.from?.id ?? "unknown"}.`);
+			await this.replyHere(
+				m.chat.id,
+				threadId,
+				`Not authorized. Your Telegram user ID is ${ctx.from?.id ?? "unknown"}.`,
+			);
 		});
 
 		this.bot.command("revoke", async (ctx) => {

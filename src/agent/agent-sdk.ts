@@ -83,7 +83,10 @@ const LOCKED_EFFORTS = new Set(["low", "medium", "high", "max"]);
  * chat can change it. PHANTOM_MODEL_LOCK forces every SDK call (chat, judges,
  * reflection, scheduler) onto one model, including the subprocess's own
  * opus/sonnet/haiku aliases and subagents; PHANTOM_EFFORT_LOCK does the same
- * for effort. Unset: calls pass through unchanged.
+ * for effort. PHANTOM_WORK_MODEL_LOCK, when set, splits the roles: the main
+ * agent (planning, decisions) stays on PHANTOM_MODEL_LOCK while subagents and
+ * the sonnet/haiku/small-fast aliases (the work) run on the work model.
+ * Unset: calls pass through unchanged.
  */
 export function applyModelLock(
 	params: AgentSdkQueryParams,
@@ -95,15 +98,16 @@ export function applyModelLock(
 
 	const options: Record<string, unknown> = { ...(params.options ?? {}) };
 	if (model) {
+		const work = env.PHANTOM_WORK_MODEL_LOCK?.trim() || model;
 		options.model = model;
 		options.env = {
 			...((options.env as Record<string, string | undefined> | undefined) ?? process.env),
 			ANTHROPIC_MODEL: model,
 			ANTHROPIC_DEFAULT_OPUS_MODEL: model,
-			ANTHROPIC_DEFAULT_SONNET_MODEL: model,
-			ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
-			ANTHROPIC_SMALL_FAST_MODEL: model,
-			CLAUDE_CODE_SUBAGENT_MODEL: model,
+			ANTHROPIC_DEFAULT_SONNET_MODEL: work,
+			ANTHROPIC_DEFAULT_HAIKU_MODEL: work,
+			ANTHROPIC_SMALL_FAST_MODEL: work,
+			CLAUDE_CODE_SUBAGENT_MODEL: work,
 		};
 	}
 	if (effort && LOCKED_EFFORTS.has(effort)) {

@@ -182,6 +182,7 @@ is unset.
 |---|---|
 | `PHANTOM_MODEL_LOCK` | Every Claude call (chat, judges, reflection, scheduler, subagents) uses this model |
 | `PHANTOM_EFFORT_LOCK` | Same for effort (`low`/`medium`/`high`/`max`) |
+| `PHANTOM_WORK_MODEL_LOCK` | Optional split: subagents and the sonnet/haiku aliases (the work) use this model, the main agent (planning, decisions) keeps `PHANTOM_MODEL_LOCK` |
 | `PHANTOM_REFLECTION` | `never` turns off self-evolution, overriding `evolution.yaml` |
 
 A chat cannot change the container environment, unlike files under `/app/config`.
