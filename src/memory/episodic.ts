@@ -2,6 +2,7 @@ import type { MemoryConfig } from "../config/types.ts";
 import { type EmbeddingClient, textToSparseVector } from "./embeddings.ts";
 import type { QdrantClient } from "./qdrant-client.ts";
 import { calculateEpisodeRecallScore } from "./ranking.ts";
+import { GLOBAL_SCOPE, scopeCondition } from "./scope.ts";
 import type { Episode, QdrantSearchResult, RecallOptions } from "./types.ts";
 
 const COLLECTION_SCHEMA = {
@@ -26,6 +27,7 @@ const PAYLOAD_INDEXES: { field: string; type: "keyword" | "integer" | "float" }[
 	{ field: "tools_used", type: "keyword" },
 	{ field: "files_touched", type: "keyword" },
 	{ field: "parent_id", type: "keyword" },
+	{ field: "scope", type: "keyword" },
 ];
 
 export class EpisodicStore {
@@ -83,6 +85,7 @@ export class EpisodicStore {
 					access_count: episode.access_count,
 					last_accessed_at: episode.last_accessed_at,
 					decay_rate: episode.decay_rate,
+					scope: episode.scope ?? GLOBAL_SCOPE,
 				},
 			},
 		]);
@@ -163,6 +166,10 @@ export class EpisodicStore {
 			}
 		}
 
+		if (options.scopes) {
+			must.push(scopeCondition(options.scopes));
+		}
+
 		if (must.length === 0) return undefined;
 		return { must };
 	}
@@ -241,6 +248,7 @@ export class EpisodicStore {
 			access_count: (p.access_count as number) ?? 0,
 			last_accessed_at: (p.last_accessed_at as string) ?? "",
 			decay_rate: (p.decay_rate as number) ?? 1.0,
+			scope: (p.scope as string | undefined) ?? GLOBAL_SCOPE,
 		};
 	}
 }

@@ -6,6 +6,7 @@ import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/provid
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
 import type { MemoryContextBuilder } from "../memory/context-builder.ts";
+import { memoryScopeFor } from "../memory/scope.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import { executeChatQuery } from "./chat-query.ts";
 import { CostTracker } from "./cost-tracker.ts";
@@ -180,7 +181,8 @@ export class AgentRuntime {
 		let memoryContext: string | undefined;
 		if (this.memoryContextBuilder) {
 			try {
-				memoryContext = (await this.memoryContextBuilder.build(text)) || undefined;
+				memoryContext =
+					(await this.memoryContextBuilder.build(text, memoryScopeFor(channelId, conversationId))) || undefined;
 			} catch {
 				/* Memory unavailable */
 			}

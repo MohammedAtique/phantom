@@ -5,3 +5,11 @@ slack:
   # default_channel_id: C04ABC123
   # default_user_id: U04ABC123
   owner_user_id: ${OWNER_SLACK_USER_ID}
+
+# Telegram (long polling, no public URL needed). Skipped when TELEGRAM_BOT_TOKEN
+# is unset. Only the user IDs in TELEGRAM_OWNER_IDS (comma-separated) are
+# answered; send /start to the bot to see your ID.
+telegram:
+  enabled: true
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  owner_ids: ${TELEGRAM_OWNER_IDS}

@@ -101,6 +101,9 @@ export const SlackChannelConfigSchema = z.object({
 export const TelegramChannelConfigSchema = z.object({
 	enabled: z.boolean().default(false),
 	bot_token: z.string().min(1),
+	// Telegram user IDs allowed to talk to the bot: a list, or a comma-separated
+	// string (so `${TELEGRAM_OWNER_IDS}` works). Empty means nobody is allowed.
+	owner_ids: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]).nullish(),
 });
 
 export const EmailChannelConfigSchema = z.object({

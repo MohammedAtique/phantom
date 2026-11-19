@@ -1,4 +1,5 @@
 import { matchesCorrectionPattern, matchesPreferencePattern } from "../shared/patterns.ts";
+import { GLOBAL_SCOPE } from "./scope.ts";
 import type { MemorySystem } from "./system.ts";
 import type { ConsolidationResult, Episode, SemanticFact } from "./types.ts";
 
@@ -48,6 +49,8 @@ export type SessionData = {
 	endedAt: string;
 	costUsd: number;
 	outcome: "success" | "failure" | "partial" | "abandoned";
+	/** Memory scope the episode and facts are written to (see scope.ts). Defaults to global. */
+	scope?: string;
 };
 
 function createEpisodeFromSession(data: SessionData): Episode {
@@ -86,6 +89,7 @@ function createEpisodeFromSession(data: SessionData): Episode {
 		access_count: 0,
 		last_accessed_at: data.endedAt,
 		decay_rate: 1.0,
+		scope: data.scope ?? GLOBAL_SCOPE,
 	};
 }
 
@@ -105,6 +109,7 @@ function calculateImportance(data: SessionData): number {
 function extractFactsFromSession(data: SessionData, episodeId: string): SemanticFact[] {
 	const facts: SemanticFact[] = [];
 	const now = new Date().toISOString();
+	const scope = data.scope ?? GLOBAL_SCOPE;
 
 	for (const message of data.userMessages) {
 		const lower = message.toLowerCase();
@@ -124,6 +129,7 @@ function extractFactsFromSession(data: SessionData, episodeId: string): Semantic
 				previous_version_id: null,
 				category: "user_preference",
 				tags: ["correction"],
+				scope,
 			});
 		}
 
@@ -142,6 +148,7 @@ function extractFactsFromSession(data: SessionData, episodeId: string): Semantic
 				previous_version_id: null,
 				category: "user_preference",
 				tags: ["preference"],
+				scope,
 			});
 		}
 	}

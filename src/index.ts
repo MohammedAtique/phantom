@@ -18,7 +18,7 @@ import { setSlackHttpChannelProvider } from "./channels/slack-http-routes.ts";
 import { SlackMetrics } from "./channels/slack-metrics.ts";
 import type { SlackTransport } from "./channels/slack-transport.ts";
 import { createStatusReactionController } from "./channels/status-reactions.ts";
-import { TelegramChannel } from "./channels/telegram.ts";
+import { TelegramChannel, parseTelegramOwnerIds } from "./channels/telegram.ts";
 import { WebhookChannel } from "./channels/webhook.ts";
 import { DEFAULT_METADATA_BASE_URL } from "./config/identity-fetcher.ts";
 import { loadChannelsConfig, loadConfig } from "./config/loader.ts";
@@ -53,6 +53,7 @@ import { PhantomMcpServer } from "./mcp/server.ts";
 import { loadMemoryConfig } from "./memory/config.ts";
 import { type SessionData, consolidateSession } from "./memory/consolidation.ts";
 import { MemoryContextBuilder } from "./memory/context-builder.ts";
+import { memoryScopeFor } from "./memory/scope.ts";
 import { MemorySystem } from "./memory/system.ts";
 import { isFirstRun, isOnboardingInProgress } from "./onboarding/detection.ts";
 import { type OnboardingTarget, startOnboarding } from "./onboarding/flow.ts";
@@ -440,6 +441,7 @@ async function main(): Promise<void> {
 	if (channelsConfig?.telegram?.enabled && channelsConfig.telegram.bot_token) {
 		telegramChannel = new TelegramChannel({
 			botToken: channelsConfig.telegram.bot_token,
+			ownerIds: parseTelegramOwnerIds(channelsConfig.telegram.owner_ids),
 		});
 		router.register(telegramChannel);
 		console.log("[phantom] Telegram channel registered");
@@ -608,6 +610,7 @@ async function main(): Promise<void> {
 		const slackThreadTs = isSlack ? (msg.metadata?.slackThreadTs as string) : null;
 		const slackMessageTs = isSlack ? (msg.metadata?.slackMessageTs as string) : null;
 		const telegramChatId = isTelegram ? (msg.metadata?.telegramChatId as number) : null;
+		const telegramThreadId = isTelegram ? (msg.metadata?.telegramThreadId as number | undefined) : undefined;
 
 		// Slack: set up status reactions on the user's message
 		let statusReactions: ReturnType<typeof createStatusReactionController> | null = null;
@@ -652,7 +655,7 @@ async function main(): Promise<void> {
 
 		// Telegram: start typing indicator
 		if (isTelegram && telegramChannel && telegramChatId) {
-			telegramChannel.startTyping(telegramChatId);
+			telegramChannel.startTyping(telegramChatId, telegramThreadId);
 		}
 
 		const response = await runtime.handleMessage(msg.channelId, msg.conversationId, msg.text, (event: RuntimeEvent) => {
@@ -690,7 +693,7 @@ async function main(): Promise<void> {
 
 		// Telegram: stop typing, send response
 		if (isTelegram && telegramChannel && telegramChatId) {
-			telegramChannel.stopTyping(telegramChatId);
+			telegramChannel.stopTyping(telegramChatId, telegramThreadId);
 		}
 
 		// Deliver the response
@@ -735,6 +738,7 @@ async function main(): Promise<void> {
 				endedAt: new Date().toISOString(),
 				costUsd: response.cost.totalUsd,
 				outcome: response.text.startsWith("Error:") ? "failure" : "success",
+				scope: memoryScopeFor(msg.channelId, msg.conversationId),
 			};
 
 			// Phase 3 simplified memory consolidation: the Phase 1+2 LLM judge

@@ -77,28 +77,40 @@ function generateMcpYaml(): { yaml: string; adminToken: string; operatorToken: s
 function generateChannelsYaml(slack: SlackAnswers): string {
 	const hasSlack = slack.botToken.length > 0;
 
+	// Telegram is enabled at init time when a bot token is in the environment.
+	// owner_ids is a comma-separated list of Telegram user IDs; nobody else is answered.
+	const telegramBlock = process.env.TELEGRAM_BOT_TOKEN
+		? `telegram:
+  enabled: true
+  bot_token: \${TELEGRAM_BOT_TOKEN}
+  owner_ids: \${TELEGRAM_OWNER_IDS}`
+		: `# telegram:
+#   enabled: false
+#   bot_token: \${TELEGRAM_BOT_TOKEN}
+#   owner_ids: \${TELEGRAM_OWNER_IDS}`;
+
 	const ownerLine = slack.ownerUserId ? `\n  owner_user_id: ${slack.ownerUserId}` : "";
 	const slackBlock = hasSlack
 		? `slack:
   enabled: true
   bot_token: \${SLACK_BOT_TOKEN}
   app_token: \${SLACK_APP_TOKEN}${slack.channelId ? `\n  default_channel_id: ${slack.channelId}` : ""}${slack.userId && !slack.channelId ? `\n  default_user_id: ${slack.userId}` : ""}${ownerLine}`
-		: `slack:
-  enabled: false
-  bot_token: \${SLACK_BOT_TOKEN}
-  app_token: \${SLACK_APP_TOKEN}
-  # default_channel_id: C04ABC123
-  # default_user_id: U04ABC123
-  # owner_user_id: U04ABC123`;
+		: // Commented out: an uncommented block with empty tokens fails schema
+			// validation and drops the whole channels file, Telegram included.
+			`# slack:
+#   enabled: false
+#   bot_token: \${SLACK_BOT_TOKEN}
+#   app_token: \${SLACK_APP_TOKEN}
+#   default_channel_id: C04ABC123
+#   default_user_id: U04ABC123
+#   owner_user_id: U04ABC123`;
 
 	return `# Channel configuration
 # Environment variables are substituted at load time: \${VAR_NAME}
 
 ${slackBlock}
 
-# telegram:
-#   enabled: false
-#   bot_token: \${TELEGRAM_BOT_TOKEN}
+${telegramBlock}
 
 # email:
 #   enabled: false

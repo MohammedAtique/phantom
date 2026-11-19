@@ -157,7 +157,38 @@ Bot interface via long polling. No public URL required.
 telegram:
   enabled: true
   bot_token: ${TELEGRAM_BOT_TOKEN}
+  owner_ids: ${TELEGRAM_OWNER_IDS}   # comma-separated Telegram user IDs
 ```
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_IDS` in `.env`. The shipped
+`config/channels.yaml` already contains this block; it is skipped when the token
+is unset.
+
+### Owner only
+
+Only user IDs listed in `owner_ids` are answered. Everyone else is ignored, and
+an empty list answers nobody. To find your ID, send `/start` to the bot: a
+non-owner gets `Not authorized. Your Telegram user ID is <id>.`
+
+### Forum topics: one conversation and one memory per topic
+
+In a group with Topics enabled, each topic is its own conversation
+(`telegram:<chatId>:<topicId>`) and replies go back into that topic.
+
+Memory is layered:
+
+| Where you write | Session | Memory it writes | Memory it recalls |
+|---|---|---|---|
+| A topic | its own | that topic | that topic + global |
+| General topic, private chat, Slack, web, email | per chat | global | global |
+
+So a new topic starts fresh, while anything said in General or a DM is
+remembered everywhere. Rules that are not vector memory (constitution, persona,
+role, and the evolved `phantom-config/` files) apply to every topic. Memories
+written before this change have no scope and are treated as global.
+
+Add the bot to the group as an admin, or turn off privacy mode in BotFather
+(`/setprivacy` -> Disable), so it receives every message.
 
 ### Features
 

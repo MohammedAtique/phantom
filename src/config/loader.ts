@@ -249,11 +249,25 @@ export function loadChannelsConfig(path?: string): ChannelsConfig | null {
 	const parsed: unknown = parse(text);
 
 	const result = ChannelsConfigSchema.safeParse(parsed);
-	if (!result.success) {
-		const issues = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
+	if (result.success) return result.data;
+
+	// One bad block (typically a channel whose ${TOKEN} env var is unset) must not
+	// take the other channels down with it: keep every block that validates on its
+	// own and skip the rest with a warning.
+	const issues = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		console.warn(`[config] Invalid channels config at ${configPath}:\n${issues}`);
 		return null;
 	}
-
-	return result.data;
+	const kept: Record<string, unknown> = {};
+	const skipped: string[] = [];
+	for (const [name, schema] of Object.entries(ChannelsConfigSchema.shape)) {
+		const block = (parsed as Record<string, unknown>)[name];
+		if (block === undefined) continue;
+		const one = schema.safeParse(block);
+		if (one.success) kept[name] = one.data;
+		else skipped.push(name);
+	}
+	console.warn(`[config] Invalid channels config at ${configPath}; skipping ${skipped.join(", ")}:\n${issues}`);
+	return kept as ChannelsConfig;
 }

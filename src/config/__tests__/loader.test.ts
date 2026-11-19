@@ -634,3 +634,40 @@ name: sync-test
 		}
 	});
 });
+
+describe("loadChannelsConfig", () => {
+	const dir = "/tmp/phantom-test-channels";
+
+	function write(yaml: string): string {
+		mkdirSync(dir, { recursive: true });
+		const path = `${dir}/channels.yaml`;
+		writeFileSync(path, yaml);
+		return path;
+	}
+
+	test("an invalid block is skipped without dropping the valid ones", async () => {
+		const { loadChannelsConfig } = await import("../loader.ts");
+		const path = write(
+			"slack:\n  enabled: true\n  bot_token: ${PHANTOM_TEST_UNSET_A}\n  app_token: ${PHANTOM_TEST_UNSET_B}\n" +
+				"telegram:\n  enabled: true\n  bot_token: 123:abc\n  owner_ids: 42\n",
+		);
+		try {
+			const channels = loadChannelsConfig(path);
+			expect(channels?.slack).toBeUndefined();
+			expect(channels?.telegram?.enabled).toBe(true);
+			expect(channels?.telegram?.owner_ids).toBe(42);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("telegram with an unset token is skipped, not fatal", async () => {
+		const { loadChannelsConfig } = await import("../loader.ts");
+		const path = write("telegram:\n  enabled: true\n  bot_token: ${PHANTOM_TEST_UNSET_C}\n");
+		try {
+			expect(loadChannelsConfig(path)).toEqual({});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});

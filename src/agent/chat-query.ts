@@ -8,6 +8,7 @@ import { buildAgentRuntimeEnv, resolveAgentRuntimeModel } from "../config/provid
 import type { PhantomConfig } from "../config/types.ts";
 import type { EvolvedConfig } from "../evolution/types.ts";
 import type { MemoryContextBuilder } from "../memory/context-builder.ts";
+import { memoryScopeFor } from "../memory/scope.ts";
 import type { RoleTemplate } from "../roles/types.ts";
 import type { CostTracker } from "./cost-tracker.ts";
 import { type AgentCost, type AgentResponse, emptyCost } from "./events.ts";
@@ -59,7 +60,8 @@ export async function executeChatQuery(
 	let memoryContext: string | undefined;
 	if (deps.memoryContextBuilder && textForMemory) {
 		try {
-			memoryContext = (await deps.memoryContextBuilder.build(textForMemory)) || undefined;
+			memoryContext =
+				(await deps.memoryContextBuilder.build(textForMemory, memoryScopeFor(channelId, conversationId))) || undefined;
 		} catch {
 			/* Memory unavailable */
 		}

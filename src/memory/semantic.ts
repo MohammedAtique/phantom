@@ -1,6 +1,7 @@
 import type { MemoryConfig } from "../config/types.ts";
 import { type EmbeddingClient, textToSparseVector } from "./embeddings.ts";
 import type { QdrantClient } from "./qdrant-client.ts";
+import { GLOBAL_SCOPE, scopeCondition } from "./scope.ts";
 import type { QdrantSearchResult, RecallOptions, SemanticFact } from "./types.ts";
 
 const COLLECTION_SCHEMA = {
@@ -21,6 +22,7 @@ const PAYLOAD_INDEXES: { field: string; type: "keyword" | "integer" | "float" }[
 	{ field: "valid_until", type: "integer" },
 	{ field: "version", type: "integer" },
 	{ field: "tags", type: "keyword" },
+	{ field: "scope", type: "keyword" },
 ];
 
 const SIMILARITY_THRESHOLD = 0.85;
@@ -78,6 +80,7 @@ export class SemanticStore {
 					previous_version_id: fact.previous_version_id,
 					category: fact.category,
 					tags: fact.tags,
+					scope: fact.scope ?? GLOBAL_SCOPE,
 				},
 			},
 		]);
@@ -109,7 +112,8 @@ export class SemanticStore {
 	}
 
 	async findContradictions(newFact: SemanticFact): Promise<SemanticFact[]> {
-		// Search for facts with the same subject and predicate
+		// Search for facts with the same subject and predicate, in the same scope only:
+		// a fact learned in one topic must not expire a fact from another topic or a global one.
 		const queryText = `${newFact.subject} ${newFact.predicate}`;
 		const queryVec = await this.embedder.embed(queryText);
 
@@ -117,7 +121,11 @@ export class SemanticStore {
 			denseVector: queryVec,
 			denseVectorName: "fact",
 			filter: {
-				must: [{ key: "subject", match: { value: newFact.subject } }, { is_null: { key: "valid_until" } }],
+				must: [
+					{ key: "subject", match: { value: newFact.subject } },
+					{ is_null: { key: "valid_until" } },
+					scopeCondition([newFact.scope ?? GLOBAL_SCOPE]),
+				],
 			},
 			limit: 10,
 			withPayload: true,
@@ -168,6 +176,10 @@ export class SemanticStore {
 					must.push({ key, match: { value } });
 				}
 			}
+		}
+
+		if (options?.scopes) {
+			must.push(scopeCondition(options.scopes));
 		}
 
 		if (must.length === 0) return undefined;
@@ -221,6 +233,7 @@ export class SemanticStore {
 			previous_version_id: (p.previous_version_id as string | null) ?? null,
 			category: (p.category as SemanticFact["category"]) ?? "domain_knowledge",
 			tags: (p.tags as string[]) ?? [],
+			scope: (p.scope as string | undefined) ?? GLOBAL_SCOPE,
 		};
 	}
 }

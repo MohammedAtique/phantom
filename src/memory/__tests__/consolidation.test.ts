@@ -157,3 +157,22 @@ describe("consolidateSession", () => {
 		expect(typeof result.durationMs).toBe("number");
 	});
 });
+
+describe("consolidateSession scope", () => {
+	test("episode and facts carry the session's scope", async () => {
+		const { memory, storedEpisodes, storedFacts } = createMockMemory();
+		await consolidateSession(
+			memory,
+			makeTestSessionData({ scope: "telegram:-1001:55", userMessages: ["I prefer tabs over spaces"] }),
+		);
+		expect(storedEpisodes[0].scope).toBe("telegram:-1001:55");
+		expect(storedFacts.length).toBeGreaterThan(0);
+		for (const f of storedFacts) expect(f.scope).toBe("telegram:-1001:55");
+	});
+
+	test("scope defaults to global", async () => {
+		const { memory, storedEpisodes } = createMockMemory();
+		await consolidateSession(memory, makeTestSessionData());
+		expect(storedEpisodes[0].scope).toBe("global");
+	});
+});

@@ -272,3 +272,24 @@ describe("MemoryContextBuilder", () => {
 		expect(result).toBe("");
 	});
 });
+
+describe("MemoryContextBuilder scopes", () => {
+	test("a topic recalls its own scope plus global", async () => {
+		const memory = createMockMemorySystem();
+		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
+		await builder.build("query", "telegram:-1001:55");
+		const expected = { limit: 10, scopes: ["telegram:-1001:55", "global"] };
+		expect((memory.recallEpisodes as ReturnType<typeof mock>).mock.calls[0][1]).toEqual(expected);
+		expect((memory.recallFacts as ReturnType<typeof mock>).mock.calls[0][1]).toEqual({ ...expected, limit: 20 });
+	});
+
+	test("no scope means global only", async () => {
+		const memory = createMockMemorySystem();
+		const builder = new MemoryContextBuilder(memory, TEST_CONFIG);
+		await builder.build("query");
+		expect((memory.recallEpisodes as ReturnType<typeof mock>).mock.calls[0][1]).toEqual({
+			limit: 10,
+			scopes: ["global"],
+		});
+	});
+});

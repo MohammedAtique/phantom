@@ -120,8 +120,8 @@ describe("phantom init", () => {
 
 		const raw = readFileSync("config/channels.yaml", "utf-8");
 		expect(raw).toContain("enabled: false");
-		expect(raw).toContain("# default_channel_id:");
-		expect(raw).toContain("# default_user_id:");
+		expect(raw).toContain("#   default_channel_id:");
+		expect(raw).toContain("#   default_user_id:");
 	});
 
 	test("does not create .env.local with --yes (no Slack tokens)", async () => {
@@ -289,12 +289,35 @@ describe("phantom init --yes (environment-aware)", () => {
 		expect(raw).toContain("owner_user_id: U04OWNER123");
 	});
 
+	test("Telegram-only channels.yaml loads with Telegram enabled (no Slack tokens)", async () => {
+		const saved = { bot: process.env.TELEGRAM_BOT_TOKEN, owners: process.env.TELEGRAM_OWNER_IDS };
+		process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-DEF";
+		process.env.TELEGRAM_OWNER_IDS = "111,222";
+		try {
+			const { runInit } = await import("../init.ts");
+			await runInit(["--yes"]);
+			const { loadChannelsConfig } = await import("../../config/loader.ts");
+			const channels = loadChannelsConfig("config/channels.yaml");
+			expect(channels?.telegram?.enabled).toBe(true);
+			expect(channels?.telegram?.bot_token).toBe("123456:ABC-DEF");
+			expect(channels?.telegram?.owner_ids).toBe("111,222");
+			expect(channels?.slack).toBeUndefined();
+		} finally {
+			// biome-ignore lint/performance/noDelete: tests must actually unset the env they set
+			if (saved.bot === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+			else process.env.TELEGRAM_BOT_TOKEN = saved.bot;
+			// biome-ignore lint/performance/noDelete: tests must actually unset the env they set
+			if (saved.owners === undefined) delete process.env.TELEGRAM_OWNER_IDS;
+			else process.env.TELEGRAM_OWNER_IDS = saved.owners;
+		}
+	});
+
 	test("channels.yaml has owner_user_id comment when disabled", async () => {
 		const { runInit } = await import("../init.ts");
 		await runInit(["--yes"]);
 
 		const raw = readFileSync("config/channels.yaml", "utf-8");
-		expect(raw).toContain("# owner_user_id:");
+		expect(raw).toContain("#   owner_user_id:");
 	});
 
 	test("reads PHANTOM_MODEL from environment", async () => {

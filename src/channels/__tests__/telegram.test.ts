@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import { TelegramChannel, type TelegramChannelConfig } from "../telegram.ts";
+import {
+	TelegramChannel,
+	type TelegramChannelConfig,
+	parseTelegramConversationId,
+	parseTelegramOwnerIds,
+} from "../telegram.ts";
 
 // Mock Telegraf
-const mockLaunch = mock(() => Promise.resolve());
+// Like Telegraf >= 4.16: onLaunch fires after getMe, the promise settles only when polling stops.
+const mockLaunch = mock((onLaunch?: () => void) => {
+	onLaunch?.();
+	return new Promise<void>(() => {});
+});
 const mockStop = mock(() => {});
 const mockSendMessage = mock(async (_chatId: number | string, _text: string, _opts?: Record<string, unknown>) => ({
 	message_id: 42,
@@ -48,6 +57,7 @@ mock.module("telegraf", () => ({
 
 const testConfig: TelegramChannelConfig = {
 	botToken: "123456:ABC-DEF",
+	ownerIds: [12345],
 };
 
 describe("TelegramChannel", () => {
@@ -81,6 +91,19 @@ describe("TelegramChannel", () => {
 		await channel.connect();
 		expect(channel.isConnected()).toBe(true);
 		expect(mockLaunch).toHaveBeenCalledTimes(1);
+	});
+
+	test("connect resolves on onLaunch even though launch() never settles", async () => {
+		const channel = new TelegramChannel(testConfig);
+		await channel.connect();
+		expect(channel.getConnectionState()).toBe("connected");
+	});
+
+	test("connect rejects when the token is refused before launch", async () => {
+		mockLaunch.mockImplementationOnce(() => Promise.reject(new Error("401: Unauthorized")));
+		const channel = new TelegramChannel(testConfig);
+		await expect(channel.connect()).rejects.toThrow("401");
+		expect(channel.getConnectionState()).toBe("error");
 	});
 
 	test("disconnect transitions to disconnected", async () => {
@@ -195,5 +218,125 @@ describe("TelegramChannel", () => {
 
 		await channel.editMessage(67890, 42, "Updated text");
 		expect(mockEditMessageText).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("TelegramChannel forum topics and owner check", () => {
+	beforeEach(() => {
+		commandHandlers.clear();
+		eventHandlers.clear();
+		actionPatterns.length = 0;
+		mockSendMessage.mockClear();
+		mockSendChatAction.mockClear();
+	});
+
+	async function deliver(
+		channel: TelegramChannel,
+		message: Record<string, unknown>,
+	): Promise<Array<{ conversationId: string; metadata?: Record<string, unknown> }>> {
+		const received: Array<{ conversationId: string; metadata?: Record<string, unknown> }> = [];
+		channel.onMessage(async (msg) => {
+			received.push({ conversationId: msg.conversationId, metadata: msg.metadata });
+		});
+		await channel.connect();
+		await eventHandlers.get("text")?.({ message });
+		return received;
+	}
+
+	test("a forum topic message gets its own conversation id", async () => {
+		const received = await deliver(new TelegramChannel(testConfig), {
+			text: "hi",
+			from: { id: 12345 },
+			chat: { id: -1001 },
+			message_id: 7,
+			message_thread_id: 55,
+			is_topic_message: true,
+		});
+		expect(received).toHaveLength(1);
+		expect(received[0].conversationId).toBe("telegram:-1001:55");
+		expect(received[0].metadata?.telegramThreadId).toBe(55);
+	});
+
+	test("General topic and reply threads in plain groups stay on the chat id", async () => {
+		const received = await deliver(new TelegramChannel(testConfig), {
+			text: "hi",
+			from: { id: 12345 },
+			chat: { id: -1001 },
+			message_id: 8,
+			message_thread_id: 3,
+		});
+		expect(received[0].conversationId).toBe("telegram:-1001");
+		expect(received[0].metadata?.telegramThreadId).toBeUndefined();
+	});
+
+	test("messages from non-owners are dropped", async () => {
+		const received = await deliver(new TelegramChannel(testConfig), {
+			text: "let me in",
+			from: { id: 999 },
+			chat: { id: 999 },
+			message_id: 9,
+		});
+		expect(received).toHaveLength(0);
+	});
+
+	test("no owner ids configured means nobody is answered", async () => {
+		const received = await deliver(new TelegramChannel({ botToken: "x:y" }), {
+			text: "hi",
+			from: { id: 12345 },
+			chat: { id: 12345 },
+			message_id: 10,
+		});
+		expect(received).toHaveLength(0);
+	});
+
+	test("/start tells a non-owner their user id and nothing else", async () => {
+		const channel = new TelegramChannel(testConfig);
+		await channel.connect();
+		const replies: string[] = [];
+		await commandHandlers.get("start")?.({
+			from: { id: 999 },
+			reply: async (t: string) => {
+				replies.push(t);
+				return { message_id: 1 };
+			},
+		});
+		expect(replies).toEqual(["Not authorized. Your Telegram user ID is 999."]);
+	});
+
+	test("send() into a topic passes message_thread_id", async () => {
+		const channel = new TelegramChannel(testConfig);
+		await channel.connect();
+		await channel.send("telegram:-1001:55", { text: "Hello" });
+		expect(mockSendMessage.mock.calls[0][0]).toBe(-1001);
+		expect(mockSendMessage.mock.calls[0][2]).toMatchObject({ message_thread_id: 55 });
+	});
+
+	test("send() to a plain chat has no message_thread_id", async () => {
+		const channel = new TelegramChannel(testConfig);
+		await channel.connect();
+		await channel.send("telegram:67890", { text: "Hello" });
+		expect(mockSendMessage.mock.calls[0][2]).not.toHaveProperty("message_thread_id");
+	});
+
+	test("typing inside a topic targets the topic", async () => {
+		const channel = new TelegramChannel(testConfig);
+		await channel.connect();
+		channel.startTyping(-1001, 55);
+		expect(mockSendChatAction).toHaveBeenCalledWith(-1001, "typing", { message_thread_id: 55 });
+		channel.stopTyping(-1001, 55);
+	});
+
+	test("parseTelegramConversationId handles both forms", () => {
+		expect(parseTelegramConversationId("telegram:67890")).toEqual({ chatId: 67890 });
+		expect(parseTelegramConversationId("telegram:-1001:55")).toEqual({ chatId: -1001, threadId: 55 });
+	});
+
+	test("parseTelegramOwnerIds accepts lists, numbers and comma strings", () => {
+		expect(parseTelegramOwnerIds("111, 222")).toEqual([111, 222]);
+		expect(parseTelegramOwnerIds(333)).toEqual([333]);
+		expect(parseTelegramOwnerIds(["444", 555])).toEqual([444, 555]);
+		expect(parseTelegramOwnerIds("")).toEqual([]);
+		expect(parseTelegramOwnerIds(null)).toEqual([]);
+		expect(parseTelegramOwnerIds("abc")).toEqual([]);
 	});
 });

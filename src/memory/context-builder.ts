@@ -1,5 +1,6 @@
 import type { MemoryConfig } from "../config/types.ts";
 import { shouldIncludeEpisodeInContext } from "./ranking.ts";
+import { readableScopes } from "./scope.ts";
 import type { MemorySystem } from "./system.ts";
 import type { Episode, Procedure, SemanticFact } from "./types.ts";
 
@@ -19,14 +20,19 @@ export class MemoryContextBuilder {
 		this.factLimit = config.context.fact_limit;
 	}
 
-	async build(query: string): Promise<string> {
+	/**
+	 * Build the memory section of the system prompt. `scope` is the conversation's
+	 * memory scope (see scope.ts): it recalls its own memories plus global ones.
+	 */
+	async build(query: string, scope?: string): Promise<string> {
 		if (!this.memory.isReady()) {
 			return "";
 		}
 
+		const scopes = readableScopes(scope);
 		const [episodes, facts, procedure] = await Promise.all([
-			this.memory.recallEpisodes(query, { limit: this.episodeLimit }).catch(() => []),
-			this.memory.recallFacts(query, { limit: this.factLimit }).catch(() => []),
+			this.memory.recallEpisodes(query, { limit: this.episodeLimit, scopes }).catch(() => []),
+			this.memory.recallFacts(query, { limit: this.factLimit, scopes }).catch(() => []),
 			this.memory.findProcedure(query).catch(() => null),
 		]);
 

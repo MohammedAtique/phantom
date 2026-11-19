@@ -21,6 +21,8 @@ export type Episode = {
 	access_count: number;
 	last_accessed_at: string;
 	decay_rate: number;
+	/** Memory scope, see scope.ts. Missing means global. */
+	scope?: string;
 };
 
 export type FactCategory = "user_preference" | "domain_knowledge" | "team" | "codebase" | "process" | "tool";
@@ -39,6 +41,8 @@ export type SemanticFact = {
 	previous_version_id: string | null;
 	category: FactCategory;
 	tags: string[];
+	/** Memory scope, see scope.ts. Missing means global. */
+	scope?: string;
 };
 
 export type ProcedureStep = {
@@ -73,6 +77,8 @@ export type RecallOptions = {
 	strategy?: "recency" | "similarity" | "temporal" | "metadata";
 	timeRange?: { from: Date; to: Date };
 	filters?: Record<string, unknown>;
+	/** Only return memories in these scopes (see scope.ts). Omitted means every scope. */
+	scopes?: string[];
 };
 
 export type ConsolidationResult = {
