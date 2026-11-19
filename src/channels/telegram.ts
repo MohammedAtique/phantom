@@ -68,6 +68,8 @@ export type TelegramChannelConfig = {
 	botToken: string;
 	/** Telegram user IDs allowed to talk to the bot. Empty or missing: nobody. */
 	ownerIds?: number[];
+	/** First reconnect delay after polling dies; doubles up to 60s. Default 5000. */
+	reconnectBaseMs?: number;
 };
 
 type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
@@ -91,6 +93,9 @@ export class TelegramChannel implements Channel {
 	private config: TelegramChannelConfig;
 	// Typing keepalive timers per chat (and topic)
 	private typingTimers = new Map<string, ReturnType<typeof setInterval>>();
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private reconnectAttempt = 0;
+	private stopped = false;
 
 	constructor(config: TelegramChannelConfig) {
 		this.config = config;
@@ -99,12 +104,13 @@ export class TelegramChannel implements Channel {
 	async connect(): Promise<void> {
 		if (this.connectionState === "connected") return;
 		this.connectionState = "connecting";
+		this.stopped = false;
 
 		try {
 			const { Telegraf } = await import("telegraf");
 			this.bot = new Telegraf(this.config.botToken) as unknown as TelegrafBot;
 
-			if (!this.config.ownerIds?.length) {
+			if (!this.config.ownerIds?.length && this.reconnectAttempt === 0) {
 				console.warn(
 					"[telegram] No owner_ids configured: every message will be refused. " +
 						"Send /start to the bot to see your user ID, then set TELEGRAM_OWNER_IDS.",
@@ -124,12 +130,17 @@ export class TelegramChannel implements Channel {
 					})
 					.catch((err: unknown) => {
 						if (!launched) return reject(err);
+						// A dropped long-poll request (e.g. ECONNRESET) ends Telegraf's polling
+						// loop for good, so the bot would stay deaf. Reconnect with backoff.
+						if (this.stopped || this.bot !== bot) return;
 						this.connectionState = "error";
 						const msg = err instanceof Error ? err.message : String(err);
 						console.error(`[telegram] Polling stopped: ${msg}`);
+						this.scheduleReconnect();
 					});
 			});
 			this.connectionState = "connected";
+			this.reconnectAttempt = 0;
 			console.log("[telegram] Bot connected via long polling");
 		} catch (err: unknown) {
 			this.connectionState = "error";
@@ -139,7 +150,36 @@ export class TelegramChannel implements Channel {
 		}
 	}
 
+	private scheduleReconnect(): void {
+		if (this.stopped || this.reconnectTimer) return;
+		const base = this.config.reconnectBaseMs ?? 5000;
+		const delay = Math.min(base * 2 ** this.reconnectAttempt, 60_000);
+		this.reconnectAttempt++;
+		console.log(`[telegram] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempt})`);
+		this.reconnectTimer = setTimeout(async () => {
+			this.reconnectTimer = null;
+			if (this.stopped) return;
+			try {
+				this.bot?.stop();
+			} catch {
+				// polling already ended
+			}
+			this.bot = null;
+			this.connectionState = "disconnected";
+			try {
+				await this.connect();
+			} catch {
+				this.scheduleReconnect();
+			}
+		}, delay);
+	}
+
 	async disconnect(): Promise<void> {
+		this.stopped = true;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		if (this.connectionState === "disconnected") return;
 
 		// Clear all typing timers

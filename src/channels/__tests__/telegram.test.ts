@@ -106,6 +106,46 @@ describe("TelegramChannel", () => {
 		expect(channel.getConnectionState()).toBe("error");
 	});
 
+	test("reconnects after polling dies (e.g. ECONNRESET)", async () => {
+		let failPolling: (err: Error) => void = () => {};
+		mockLaunch.mockImplementationOnce((onLaunch?: () => void) => {
+			onLaunch?.();
+			return new Promise<void>((_, reject) => {
+				failPolling = reject;
+			});
+		});
+		const channel = new TelegramChannel({ ...testConfig, reconnectBaseMs: 10 });
+		await channel.connect();
+		const launchesBefore = mockLaunch.mock.calls.length;
+
+		failPolling(new Error("ECONNRESET"));
+		await new Promise((r) => setTimeout(r, 0));
+		expect(channel.getConnectionState()).toBe("error");
+
+		await new Promise((r) => setTimeout(r, 50));
+		expect(mockLaunch.mock.calls.length).toBe(launchesBefore + 1);
+		expect(channel.getConnectionState()).toBe("connected");
+		await channel.disconnect();
+	});
+
+	test("no reconnect after disconnect", async () => {
+		let failPolling: (err: Error) => void = () => {};
+		mockLaunch.mockImplementationOnce((onLaunch?: () => void) => {
+			onLaunch?.();
+			return new Promise<void>((_, reject) => {
+				failPolling = reject;
+			});
+		});
+		const channel = new TelegramChannel({ ...testConfig, reconnectBaseMs: 10 });
+		await channel.connect();
+		await channel.disconnect();
+		const launchesBefore = mockLaunch.mock.calls.length;
+		failPolling(new Error("stopped"));
+		await new Promise((r) => setTimeout(r, 50));
+		expect(mockLaunch.mock.calls.length).toBe(launchesBefore);
+		expect(channel.getConnectionState()).toBe("disconnected");
+	});
+
 	test("disconnect transitions to disconnected", async () => {
 		const channel = new TelegramChannel(testConfig);
 		await channel.connect();
